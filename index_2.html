@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flashcards de Coreano</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">한</span><span class="brand-text">Coreano</span></div>
+    <nav class="tabs" id="tabs">
+      <button data-view="home" class="active">Inicio</button>
+      <button data-view="learn">Aprender</button>
+      <button data-view="practice">Practicar</button>
+      <button data-view="cards">Tarjetas</button>
+      <button data-view="folders">Carpetas</button>
+      <button data-view="progress">Progreso</button>
+      <button data-view="settings">Ajustes</button>
+    </nav>
+    <button class="icon-btn" id="darkBtn" title="Modo oscuro" aria-label="Modo oscuro">🌙</button>
+  </div>
+</header>
+
+<main class="container">
+
+<!-- INICIO -->
+<section id="view-home" class="view">
+  <div id="onboarding" class="panel hero" style="display:none">
+    <h2>Bienvenido 👋</h2>
+    <p>Todavía no hay tarjetas. Importa tu archivo <code>.json</code> para empezar.</p>
+    <label class="btn primary" for="importFile1">⬆️ Importar tarjetas</label>
+  </div>
+
+  <div id="homeMain">
+    <div class="panel hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow" id="homeDate"></div>
+          <h2 id="homeTitle">Tu repaso de hoy</h2>
+        </div>
+        <div class="streak" id="homeStreak">🔥 0</div>
+      </div>
+      <div class="queue-row">
+        <div class="queue-item"><div class="queue-num" id="qDue">0</div><div class="queue-label">para repasar</div></div>
+        <div class="queue-item"><div class="queue-num" id="qNew">0</div><div class="queue-label">nuevas hoy</div></div>
+        <div class="queue-item"><div class="queue-num" id="qDone">0</div><div class="queue-label">hechas hoy</div></div>
+      </div>
+      <div class="hero-actions">
+        <button class="btn primary big" id="startDaily">▶ Empezar repaso</button>
+        <button class="btn ghost" id="startPracticeHome">🎯 Practicar</button>
+      </div>
+      <div class="hint" id="homeHint"></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>Tu vocabulario</h3>
+        <div class="stack-bar" id="stackBar"></div>
+        <div class="legend" id="stackLegend"></div>
+      </div>
+      <div class="panel">
+        <h3>Para reforzar</h3>
+        <div id="weakList" class="weak-list"></div>
+        <button class="btn ghost small" id="practiceWeak">Practicar mis difíciles</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Dominio por carpeta</h3>
+      <div id="folderMastery" class="mastery-list"></div>
+    </div>
+    <div class="panel warn" id="backupWarn" style="display:none"></div>
+  </div>
+</section>
+
+<!-- APRENDER -->
+<section id="view-learn" class="view" style="display:none">
+  <div class="toolbar">
+    <select id="learnFolder" class="select"></select>
+    <select id="learnDir" class="select">
+      <option value="ko">한국어 → Español</option>
+      <option value="es">Español → 한국어</option>
+    </select>
+    <span class="muted" id="learnInfo"></span>
+  </div>
+  <div class="progress-line"><div id="learnBar"></div></div>
+
+  <div id="learnArea">
+    <div class="flip" id="learnCard" tabindex="0">
+      <div class="flip-inner">
+        <div class="face front">
+          <div class="face-label" id="learnLabelFront">Coreano</div>
+          <div class="word" id="learnFront"></div>
+          <button class="btn-audio" id="learnAudio" aria-label="Escuchar">🔊</button>
+          <div class="tap">Toca o pulsa <kbd>Espacio</kbd></div>
+        </div>
+        <div class="face back">
+          <div class="face-label" id="learnLabelBack">Español</div>
+          <div class="meaning" id="learnBack"></div>
+          <div class="sub" id="learnBackSub"></div>
+          <div class="example" id="learnExample"></div>
+        </div>
+      </div>
+    </div>
+    <div class="rate" id="learnRate" style="visibility:hidden">
+      <button class="rate-btn again" data-rate="again"><span>Otra vez</span><small id="ivAgain"></small><kbd>1</kbd></button>
+      <button class="rate-btn good" data-rate="good"><span>Bien</span><small id="ivGood"></small><kbd>2</kbd></button>
+      <button class="rate-btn easy" data-rate="easy"><span>Fácil</span><small id="ivEasy"></small><kbd>3</kbd></button>
+    </div>
+  </div>
+
+  <div id="learnDone" class="panel hero" style="display:none">
+    <h2 id="learnDoneTitle">¡Listo por hoy! 🎉</h2>
+    <p id="learnDoneText"></p>
+    <div class="hero-actions">
+      <button class="btn primary" id="learnMoreNew">➕ 10 palabras nuevas más</button>
+      <button class="btn ghost" id="learnAll">🔁 Repasar todo igual</button>
+    </div>
+  </div>
+</section>
+
+<!-- PRACTICAR -->
+<section id="view-practice" class="view" style="display:none">
+  <div id="practiceSetup" class="panel">
+    <h3>Configura tu práctica</h3>
+    <div class="form-grid">
+      <label>Carpeta<select id="pFolder" class="select"></select></label>
+      <label>Tipo
+        <select id="pMode" class="select">
+          <option value="mc-ko">Opción múltiple: 한국어 → Español</option>
+          <option value="mc-es">Opción múltiple: Español → 한국어</option>
+          <option value="type">Escribir el significado en español</option>
+          <option value="type-ko">Escribir en coreano (hangul)</option>
+        </select>
+      </label>
+      <label>Cantidad
+        <select id="pCount" class="select">
+          <option value="10">10 tarjetas</option>
+          <option value="20" selected>20 tarjetas</option>
+          <option value="40">40 tarjetas</option>
+          <option value="9999">Todas</option>
+        </select>
+      </label>
+    </div>
+    <div class="check-row"><label><input type="checkbox" id="pWeak"> Solo mis difíciles</label></div>
+    <button class="btn primary big" id="pStart">▶ Empezar</button>
+  </div>
+
+  <div id="practiceRun" style="display:none">
+    <div class="progress-line"><div id="pBar"></div></div>
+    <div class="practice-stats"><span id="pPos"></span><span class="ok" id="pOk">✓ 0</span><span class="bad" id="pBad">✗ 0</span></div>
+    <div class="panel q-card">
+      <div class="face-label" id="pLabel"></div>
+      <div class="word" id="pPrompt"></div>
+      <button class="btn-audio" id="pAudio" aria-label="Escuchar">🔊</button>
+      <div id="pChoices" class="choices"></div>
+      <div id="pTypeWrap" style="display:none">
+        <input id="pInput" class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Escribe tu respuesta y pulsa Enter">
+        <div class="btn-row"><button class="btn primary" id="pCheck">Comprobar</button><button class="btn ghost" id="pSkip">No sé</button></div>
+      </div>
+      <div id="pFeedback" class="feedback"></div>
+      <button class="btn primary" id="pNext" style="display:none">Siguiente →</button>
+    </div>
+  </div>
+
+  <div id="practiceDone" class="panel hero" style="display:none">
+    <h2 id="pDoneTitle"></h2>
+    <p id="pDoneText"></p>
+    <div class="hero-actions">
+      <button class="btn primary" id="pRetryWrong">Repetir las falladas</button>
+      <button class="btn ghost" id="pBack">Volver</button>
+    </div>
+  </div>
+</section>
+
+<!-- TARJETAS -->
+<section id="view-cards" class="view" style="display:none">
+  <div class="panel">
+    <h3>Agregar tarjeta</h3>
+    <div class="add-grid">
+      <input id="addKo" class="input ko" placeholder="한국어">
+      <input id="addEs" class="input" placeholder="Significado en español">
+      <select id="addTopic" class="select"></select>
+      <input id="addExample" class="input span-all" placeholder="Frase de ejemplo (opcional): 저는 학생이에요. = Soy estudiante.">
+      <button class="btn primary" id="addBtn">➕ Agregar</button>
+    </div>
+  </div>
+  <div class="toolbar">
+    <input id="search" class="input" placeholder="🔎 Buscar en coreano o español…">
+    <select id="cardsFolder" class="select"></select>
+    <select id="cardsFilter" class="select">
+      <option value="all">Todas</option>
+      <option value="new">Nuevas</option>
+      <option value="due">Para repasar</option>
+      <option value="weak">Difíciles</option>
+      <option value="mastered">Dominadas</option>
+    </select>
+  </div>
+  <div class="muted" id="cardsCount"></div>
+  <div id="cardsList" class="cards-list"></div>
+  <button class="btn ghost" id="moreCards" style="display:none">Mostrar más</button>
+</section>
+
+<!-- CARPETAS -->
+<section id="view-folders" class="view" style="display:none">
+  <div class="toolbar">
+    <input id="newFolderName" class="input" placeholder="Nombre de la nueva carpeta">
+    <button class="btn primary" id="newFolderBtn">📁 Crear</button>
+  </div>
+  <div id="folderGrid" class="folder-grid"></div>
+</section>
+
+<!-- PROGRESO -->
+<section id="view-progress" class="view" style="display:none">
+  <div id="progressSummary" class="summary-grid"></div>
+  <div class="panel"><h3>Últimos 14 días</h3><div id="chart" class="chart"></div>
+    <div class="legend"><span><i class="dot facil"></i>Fácil</span><span><i class="dot medio"></i>Bien</span><span><i class="dot dificil"></i>Otra vez</span></div>
+  </div>
+  <div class="panel"><h3>Próximos repasos</h3><div id="forecast" class="chart"></div></div>
+</section>
+
+<!-- AJUSTES -->
+<section id="view-settings" class="view" style="display:none">
+  <div class="panel">
+    <h3>Copia de seguridad</h3>
+    <p class="muted">Tus tarjetas y tu progreso se guardan en este navegador. Exporta un archivo de vez en cuando por seguridad.</p>
+    <div class="btn-row">
+      <button class="btn primary" id="exportBtn">⬇️ Exportar (.json)</button>
+      <label class="btn ghost" for="importFile2">⬆️ Importar (.json)</label>
+    </div>
+    <p class="muted small" id="lastExport"></p>
+  </div>
+  <div class="panel">
+    <h3>Estudio</h3>
+    <div class="form-grid">
+      <label>Palabras nuevas por día
+        <input type="number" id="setNew" class="input" min="0" max="100">
+      </label>
+      <label>Máximo de repasos por día
+        <input type="number" id="setRev" class="input" min="5" max="500">
+      </label>
+    </div>
+    <div class="check-row"><label><input type="checkbox" id="setAuto"> Reproducir el audio automáticamente</label></div>
+    <p class="muted small" id="ttsInfo"></p>
+  </div>
+  <div class="panel danger">
+    <h3>Zona de cuidado</h3>
+    <button class="btn ghost" id="resetProgress">Reiniciar todo el progreso de estudio</button>
+  </div>
+</section>
+
+</main>
+
+<input type="file" id="importFile1" accept=".json" hidden>
+<input type="file" id="importFile2" accept=".json" hidden>
+
+<!-- Modales -->
+<div class="modal" id="modal" style="display:none"><div class="modal-box" id="modalBox"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
