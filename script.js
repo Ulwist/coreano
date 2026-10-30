@@ -261,17 +261,26 @@ function renderLearn() {
   $('learnArea').style.display = 'block'; $('learnDone').style.display = 'none';
   const card = s.queue[s.index];
   const ko = settings.dir === 'ko';
+  const wasRevealed = $('learnCard').classList.contains('revealed');
   s.revealed = false;
   $('learnCard').classList.remove('revealed');
   $('learnLabelFront').textContent = ko ? 'Coreano' : 'Español';
-  $('learnLabelBack').textContent = ko ? 'Español' : 'Coreano';
   const front = $('learnFront'); front.textContent = ko ? card.korean : card.spanish; front.classList.toggle('es', !ko);
   $('learnAudio').style.display = ko ? '' : 'none';
-  $('learnBack').textContent = ko ? card.spanish : card.korean;
-  $('learnBack').style.fontFamily = ko ? '' : 'var(--ko)';
-  $('learnBackSub').innerHTML = ko ? `<span class="ko-sub" style="font-family:var(--ko);font-size:22px">${esc(card.korean)}</span>` : '<button class="btn-audio" id="learnAudio2">🔊</button>';
-  if (!ko) $('learnAudio2').onclick = (e) => { e.stopPropagation(); speak(card.korean, e.currentTarget); };
-  $('learnExample').innerHTML = card.example ? `<b>${esc(card.example.split('=')[0].trim())}</b>${card.example.includes('=') ? '<br>' + esc(card.example.split('=').slice(1).join('=').trim()) : ''}` : '';
+  // El dorso se rellena recién cuando la tarjeta terminó de darse vuelta,
+  // para que no se alcance a ver la respuesta siguiente durante la animación.
+  clearTimeout(learn.backTimer);
+  learn.fillBack = () => {
+    clearTimeout(learn.backTimer); learn.fillBack = null;
+    $('learnLabelBack').textContent = ko ? 'Español' : 'Coreano';
+    $('learnBack').textContent = ko ? card.spanish : card.korean;
+    $('learnBack').style.fontFamily = ko ? '' : 'var(--ko)';
+    $('learnBackSub').innerHTML = ko ? `<span class="ko-sub" style="font-family:var(--ko);font-size:22px">${esc(card.korean)}</span>` : '<button class="btn-audio" id="learnAudio2">🔊</button>';
+    if (!ko) $('learnAudio2').onclick = (e) => { e.stopPropagation(); speak(card.korean, e.currentTarget); };
+    $('learnExample').innerHTML = card.example ? `<b>${esc(card.example.split('=')[0].trim())}</b>${card.example.includes('=') ? '<br>' + esc(card.example.split('=').slice(1).join('=').trim()) : ''}` : '';
+  };
+  if (wasRevealed) learn.backTimer = setTimeout(() => learn.fillBack && learn.fillBack(), 520);
+  else learn.fillBack();
   $('learnRate').style.visibility = 'hidden';
   const nw = s.queue.filter(isNew).length;
   $('learnInfo').textContent = `${s.queue.length - s.index} por hacer${learn.cram ? ' · modo repaso libre (no cambia fechas)' : ''}`;
@@ -281,6 +290,7 @@ function renderLearn() {
 function revealLearn() {
   const s = learn.session; if (!s || s.revealed || s.index >= s.queue.length) return;
   s.revealed = true;
+  if (learn.fillBack) learn.fillBack();
   $('learnCard').classList.add('revealed');
   const card = s.queue[s.index];
   $('ivAgain').textContent = 'hoy'; $('ivGood').textContent = fmtIv(computeNext(card, 'good').ivl); $('ivEasy').textContent = fmtIv(computeNext(card, 'easy').ivl);
