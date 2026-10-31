@@ -197,3 +197,6 @@ code{background:var(--surface2);padding:1px 6px;border-radius:6px}
   .card-row .ko{min-width:90px}
   .flip-inner{min-height:260px}
 }
+
+.sync-line{margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer}
+.sync-line:hover{color:var(--primary)}

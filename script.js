@@ -5,20 +5,22 @@
    ═══════════════════════════════════════════ */
 
 const $ = (id) => document.getElementById(id);
-const KEYS = { cards: 'koreanFlashcards', topics: 'flashcardTopics', daily: 'flashcardDailyStats', settings: 'koreanSettings', dark: 'darkMode' };
+const KEYS = { cards: 'koreanFlashcards', topics: 'flashcardTopics', daily: 'flashcardDailyStats', settings: 'koreanSettings', dark: 'darkMode', syncMeta: 'koreanSyncMeta', pending: 'koreanPendingDel' };
 
 let cards = [];
 let topics = [];
 let daily = {};
 let settings = { newPerDay: 10, maxReviews: 100, auto: false, dir: 'ko', lastExport: null };
+let syncMeta = { topicsUpdated: 0, settingsUpdated: 0, topicsJson: '', settingsJson: '', delTopics: {} };
+const sync = { user: null, base: '', auth: null, db: null, unsubs: [], lastJson: new Map(), queue: new Map(), pendingDel: {}, timer: null, mTimer: null, applying: false, status: 'off', err: '', metaSeen: false, cardsSeen: false };
 
 /* ───────── utilidades ───────── */
 function lsGet(k, fallback) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } }
 function lsSet(k, v) { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) { console.warn('No se pudo guardar', e); } }
-const saveCards = () => lsSet(KEYS.cards, cards);
-const saveTopics = () => lsSet(KEYS.topics, topics);
-const saveDaily = () => lsSet(KEYS.daily, daily);
-const saveSettings = () => lsSet(KEYS.settings, settings);
+const saveCards = () => { syncTrack(); lsSet(KEYS.cards, cards); };
+const saveTopics = () => { lsSet(KEYS.topics, topics); topicsTrack(); };
+const saveDaily = () => { lsSet(KEYS.daily, daily); pushMetaSoon(); };
+const saveSettings = () => { lsSet(KEYS.settings, settings); settingsTrack(); };
 
 function esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function shuffle(a) { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
@@ -209,6 +211,7 @@ function renderHome() {
     return `<div class="mastery-row"><span>${esc(t.name)}</span><div class="mini-bar"><i class="seg-m" style="width:${m / list.length * 100}%"></i><i class="seg-l" style="width:${l / list.length * 100}%"></i></div><span>${m}/${list.length}</span></div>`;
   }).join('');
 
+  renderSyncUi();
   const w = $('backupWarn');
   const days = settings.lastExport ? daysBetween(dayKey(new Date(settings.lastExport)), today()) : null;
   if (days === null || days >= 7) {
@@ -554,7 +557,7 @@ function renderProgress() {
 function renderSettings() {
   $('setNew').value = settings.newPerDay; $('setRev').value = settings.maxReviews; $('setAuto').checked = settings.auto;
   $('lastExport').textContent = settings.lastExport ? 'Última exportación: ' + new Date(settings.lastExport).toLocaleString('es-AR') : 'Todavía no exportaste.';
-  updateTtsInfo();
+  updateTtsInfo(); renderSyncUi();
 }
 $('setNew').addEventListener('change', () => { settings.newPerDay = Math.max(0, parseInt($('setNew').value, 10) || 0); saveSettings(); });
 $('setRev').addEventListener('change', () => { settings.maxReviews = Math.max(5, parseInt($('setRev').value, 10) || 100); saveSettings(); });
@@ -604,7 +607,7 @@ function handleImport(file) {
     if (!inCards.length) { toast('El archivo no contiene tarjetas.'); return; }
     const finish = () => { migrateCards(); saveCards(); saveTopics(); saveDaily(); learn.session = null; learn.extraNew = 0; fillAllSelects(); show(currentView === 'settings' ? 'settings' : 'home'); };
     if (!cards.length) { cards = inCards; topics = data.topics || []; daily = data.dailyStats || {}; if (data.settings) settings = { ...settings, ...data.settings }; saveSettings(); finish(); toast(`Importadas ${cards.length} tarjetas ✔`); return; }
-    openModal('Importar tarjetas', `<p>El archivo trae <b>${inCards.length}</b> tarjetas. Ya tienes <b>${cards.length}</b>.</p><p class="muted small"><b>Fusionar</b> agrega las nuevas y corrige textos, y conserva tu progreso. <b>Reemplazar</b> borra todo y deja lo del archivo.</p>`, [
+    openModal('Importar tarjetas', `<p>El archivo trae <b>${inCards.length}</b> tarjetas. Ya tienes <b>${cards.length}</b>.</p><p class="muted small"><b>Fusionar</b> agrega las nuevas y corrige textos, y conserva tu progreso. <b>Reemplazar</b> borra todo y deja lo del archivo${sync.user ? ' <b>(y también lo borra de la nube y de tus otros dispositivos)</b>' : ''}.</p>`, [
       { label: 'Cancelar', cls: 'ghost' },
       { label: 'Reemplazar', cls: '', fn: () => { cards = inCards; topics = data.topics || []; daily = data.dailyStats || {}; finish(); toast('Datos reemplazados'); } },
       { label: 'Fusionar', cls: 'primary', fn: () => { const r = mergeImport(data); finish(); toast(`${r.added} nuevas, ${r.updated} actualizadas ✔`); } }
@@ -656,6 +659,216 @@ document.addEventListener('keydown', e => {
   }
 });
 
+/* ═══════════ SINCRONIZACIÓN (Firebase: cuenta de Google) ═══════════ */
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAK5GhYLM0KZedVbwZdwng-Ay1hPPxsIjk',
+  authDomain: 'programa-coreano.firebaseapp.com',
+  projectId: 'programa-coreano',
+  storageBucket: 'programa-coreano.firebasestorage.app',
+  messagingSenderId: '553470082090',
+  appId: '1:553470082090:web:90eb18de1b7b0440721753'
+};
+const plain = (o) => JSON.parse(JSON.stringify(o));
+function cardJson(c) { const r = {}; Object.keys(c).sort().forEach(k => { if (k !== 'updated') r[k] = c[k]; }); return JSON.stringify(r); }
+function derivedStamp(c) { return Math.max(Date.parse(c.created) || 0, Date.parse(c.lastSeenLearn) || 0); }
+
+// Cada vez que se guardan las tarjetas se detecta qué cambió: lo cambiado se marca con la hora
+// y se envía a la nube; lo borrado se envía como "lápida" para que se borre en el otro dispositivo.
+function syncTrack() {
+  if (sync.applying) return;
+  const now = Date.now(); let changed = false; const seen = new Set();
+  cards.forEach(c => {
+    seen.add(c.id);
+    const j = cardJson(c), prev = sync.lastJson.get(c.id);
+    if (prev === j) return;
+    c.updated = prev === undefined ? (c.updated || derivedStamp(c) || now) : now;
+    sync.lastJson.set(c.id, j); changed = true;
+    if (sync.user) sync.queue.set(c.id, plain(c));
+  });
+  [...sync.lastJson.keys()].forEach(id => {
+    if (seen.has(id)) return;
+    sync.lastJson.delete(id); sync.pendingDel[id] = now; changed = true;
+    if (sync.user) sync.queue.set(id, { id, deleted: true, updated: now });
+  });
+  if (changed) { lsSet(KEYS.pending, sync.pendingDel); if (sync.user) schedulePush(); }
+}
+function topicsTrack() {
+  if (sync.applying) return;
+  const j = JSON.stringify(topics); if (j === syncMeta.topicsJson) return;
+  const now = Date.now();
+  const prevIds = JSON.parse(syncMeta.topicsJson || '[]').map(t => t.id);
+  prevIds.forEach(id => { if (!topics.some(t => t.id === id)) syncMeta.delTopics[id] = now; });
+  syncMeta.topicsJson = j; syncMeta.topicsUpdated = now; lsSet(KEYS.syncMeta, syncMeta); pushMetaSoon();
+}
+function settingsTrack() {
+  if (sync.applying) return;
+  const j = JSON.stringify([settings.newPerDay, settings.maxReviews, settings.auto]); if (j === syncMeta.settingsJson) return;
+  syncMeta.settingsJson = j; syncMeta.settingsUpdated = Date.now(); lsSet(KEYS.syncMeta, syncMeta); pushMetaSoon();
+}
+function syncBaseline() {
+  let fix = false;
+  cards.forEach(c => { if (!c.updated) { c.updated = derivedStamp(c); fix = true; } sync.lastJson.set(c.id, cardJson(c)); });
+  if (fix) lsSet(KEYS.cards, cards);
+  syncMeta.topicsJson = JSON.stringify(topics);
+  syncMeta.settingsJson = JSON.stringify([settings.newPerDay, settings.maxReviews, settings.auto]);
+}
+
+function setStatus(s, err) { sync.status = s; sync.err = err || ''; renderSyncUi(); }
+function renderSyncUi() {
+  const el = $('syncStatus'), home = $('syncHome'); if (!el) return;
+  let t;
+  if (sync.status === 'nofb') t = '⚠️ No se pudo cargar el servicio de sincronización. Revisa tu conexión y recarga la página.';
+  else if (!sync.user) t = 'Sin sincronizar. Inicia sesión para tener las mismas tarjetas y el mismo avance en todos tus dispositivos.';
+  else if (sync.status === 'error') t = sync.err === 'permission-denied' ? '⚠️ Firebase no deja guardar: revisa que publicaste las reglas de Firestore.' : '⚠️ Error de sincronización' + (sync.err ? ' (' + sync.err + ')' : '') + '. Se reintenta solo.';
+  else if (!navigator.onLine) t = '📴 Sin conexión · los cambios se enviarán cuando vuelva internet.';
+  else if (sync.status === 'syncing') t = '🔄 Sincronizando…';
+  else t = '☁️ Sincronizado · ' + (sync.user.email || '');
+  el.textContent = t;
+  if (home) home.textContent = !sync.user ? '☁️ Sin sincronizar · toca para iniciar sesión' : t;
+  $('syncLogin').style.display = sync.user || sync.status === 'nofb' ? 'none' : '';
+  $('syncLogout').style.display = sync.user ? '' : 'none';
+}
+
+function initSync() {
+  if (!window.firebase || !firebase.initializeApp) { setStatus('nofb'); return; }
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    sync.auth = firebase.auth(); sync.db = firebase.firestore();
+    try { const p = sync.db.enablePersistence({ synchronizeTabs: true }); if (p && p.catch) p.catch(() => { }); } catch (e) { }
+    sync.auth.onAuthStateChanged(onUser);
+  } catch (e) { console.warn(e); setStatus('nofb'); }
+  window.addEventListener('online', renderSyncUi); window.addEventListener('offline', renderSyncUi);
+}
+function onUser(u) {
+  sync.unsubs.forEach(f => { try { f(); } catch (e) { } }); sync.unsubs = [];
+  clearTimeout(sync.timer); clearTimeout(sync.mTimer); sync.metaSeen = false; sync.cardsSeen = false; sync.queue.clear();
+  sync.user = u || null; sync.base = u ? 'users/' + u.uid : '';
+  if (!u) { setStatus('off'); return; }
+  setStatus('syncing');
+  Object.keys(sync.pendingDel).forEach(id => sync.queue.set(Number(id), { id: Number(id), deleted: true, updated: sync.pendingDel[id] }));
+  const onErr = (e) => { console.warn('sync', e); setStatus('error', e && e.code); };
+  sync.unsubs.push(sync.db.doc(sync.base + '/meta/state').onSnapshot(onMetaSnap, onErr));
+  sync.unsubs.push(sync.db.collection(sync.base + '/cards').onSnapshot(onCardsSnap, onErr));
+}
+
+function schedulePush() { if (!sync.user) return; clearTimeout(sync.timer); setStatus('syncing'); sync.timer = setTimeout(flushPush, 700); }
+async function flushPush() {
+  if (!sync.user || !sync.queue.size) { if (sync.user && sync.status === 'syncing' && sync.cardsSeen) setStatus('ok'); return; }
+  const items = [...sync.queue.entries()]; sync.queue.clear();
+  try {
+    for (let i = 0; i < items.length; i += 400) {
+      const b = sync.db.batch();
+      items.slice(i, i + 400).forEach(([id, d]) => b.set(sync.db.doc(sync.base + '/cards/' + id), d));
+      await b.commit();
+    }
+    items.forEach(([id, d]) => { if (d.deleted) delete sync.pendingDel[id]; }); lsSet(KEYS.pending, sync.pendingDel);
+    if (!sync.queue.size) setStatus('ok');
+  } catch (e) {
+    console.warn('push', e); items.forEach(([id, d]) => { if (!sync.queue.has(id)) sync.queue.set(id, d); });
+    setStatus('error', e && e.code); setTimeout(schedulePush, 15000);
+  }
+}
+
+function refreshView() {
+  fillAllSelects();
+  if (currentView === 'home') renderHome();
+  else if (currentView === 'cards') renderCards();
+  else if (currentView === 'folders') renderFolders();
+  else if (currentView === 'progress') renderProgress();
+  else if (currentView === 'settings') renderSettings();
+}
+
+function onCardsSnap(snap) {
+  const first = !sync.cardsSeen; sync.cardsSeen = true;
+  let changed = false; const remoteIds = new Set();
+  const byId = new Map(cards.map(c => [c.id, c]));
+  sync.applying = true;
+  try {
+    snap.docChanges().forEach(ch => {
+      if (ch.type === 'removed') return;
+      remoteIds.add(Number(ch.doc.id));
+      if (ch.doc.metadata && ch.doc.metadata.hasPendingWrites) return;
+      const r = ch.doc.data(), id = Number(ch.doc.id), ru = r.updated || 0, local = byId.get(id);
+      if (r.deleted) {
+        if (local && ru >= (local.updated || 0)) { cards = cards.filter(c => c.id !== id); byId.delete(id); sync.lastJson.delete(id); changed = true; }
+        else if (local) sync.queue.set(id, plain(local));
+        return;
+      }
+      if (!local) {
+        const pend = sync.pendingDel[id];
+        if (pend && pend >= ru) { sync.queue.set(id, { id, deleted: true, updated: pend }); return; }
+        const c = plain(r); cards.push(c); byId.set(id, c); sync.lastJson.set(id, cardJson(c)); changed = true;
+      } else if (ru > (local.updated || 0)) {
+        Object.keys(local).forEach(k => delete local[k]); Object.assign(local, plain(r));
+        sync.lastJson.set(id, cardJson(local)); changed = true;
+      } else if (ru < (local.updated || 0)) sync.queue.set(id, plain(local));
+    });
+    // primera carga: lo que solo existe en este dispositivo se sube
+    if (first) cards.forEach(c => { if (!remoteIds.has(c.id) && !sync.queue.has(c.id)) sync.queue.set(c.id, plain(c)); });
+  } finally { sync.applying = false; }
+  if (changed) { lsSet(KEYS.cards, cards); refreshView(); }
+  if (sync.queue.size) schedulePush(); else if (first || changed) setStatus('ok');
+}
+
+function onMetaSnap(snap) {
+  if (snap.metadata && snap.metadata.hasPendingWrites) return;
+  sync.metaSeen = true;
+  if (!snap.exists) { pushMeta(); return; }
+  const r = snap.data(); let changed = false, needPush = false;
+  sync.applying = true;
+  try {
+    // carpetas: se unen las dos listas; el nombre lo decide la modificación más reciente; las borradas quedan borradas
+    const del = { ...(r.deletedTopics || {}) }; Object.keys(syncMeta.delTopics).forEach(k => { del[k] = Math.max(del[k] || 0, syncMeta.delTopics[k]); });
+    const localNewer = (syncMeta.topicsUpdated || 0) >= (r.topicsUpdated || 0);
+    const map = new Map((r.topics || []).map(t => [t.id, { ...t }]));
+    topics.forEach(t => { if (map.has(t.id)) { if (localNewer) map.get(t.id).name = t.name; } else map.set(t.id, { ...t }); });
+    const nt = [...map.values()].filter(t => !del[t.id]);
+    if (JSON.stringify(nt) !== JSON.stringify(topics)) { topics = nt; changed = true; }
+    if (JSON.stringify(del) !== JSON.stringify(syncMeta.delTopics)) { syncMeta.delTopics = del; }
+    if (JSON.stringify(nt) !== JSON.stringify(r.topics || []) || Object.keys(del).some(k => !(r.deletedTopics || {})[k])) needPush = true;
+    syncMeta.topicsUpdated = Math.max(syncMeta.topicsUpdated || 0, r.topicsUpdated || 0);
+    syncMeta.topicsJson = JSON.stringify(topics);
+    // estadísticas diarias: se queda con el valor más alto de cada día
+    const rd = r.daily || {};
+    Object.keys(rd).forEach(k => {
+      const l = daily[k] || (daily[k] = { dificil: 0, medio: 0, facil: 0 });
+      ['dificil', 'medio', 'facil'].forEach(f => { const v = rd[k][f] || 0; if (v > (l[f] || 0)) { l[f] = v; changed = true; } else if ((l[f] || 0) > v) needPush = true; });
+    });
+    Object.keys(daily).forEach(k => { if (!rd[k]) needPush = true; });
+    // ajustes de estudio
+    if ((r.settingsUpdated || 0) > (syncMeta.settingsUpdated || 0) && r.settings) {
+      ['newPerDay', 'maxReviews', 'auto'].forEach(k => { if (r.settings[k] !== undefined) settings[k] = r.settings[k]; });
+      syncMeta.settingsUpdated = r.settingsUpdated; syncMeta.settingsJson = JSON.stringify([settings.newPerDay, settings.maxReviews, settings.auto]);
+      lsSet(KEYS.settings, settings); changed = true;
+    } else if ((r.settingsUpdated || 0) < (syncMeta.settingsUpdated || 0)) needPush = true;
+  } finally { sync.applying = false; }
+  lsSet(KEYS.topics, topics); lsSet(KEYS.daily, daily); lsSet(KEYS.syncMeta, syncMeta);
+  if (needPush) pushMetaSoon();
+  if (changed) refreshView();
+}
+function pushMetaSoon() { if (!sync.user || sync.applying) return; clearTimeout(sync.mTimer); sync.mTimer = setTimeout(pushMeta, 900); }
+function pushMeta() {
+  if (!sync.user || !sync.metaSeen) return;
+  if (!syncMeta.topicsUpdated) syncMeta.topicsUpdated = Date.now();
+  if (!syncMeta.settingsUpdated) syncMeta.settingsUpdated = Date.now();
+  lsSet(KEYS.syncMeta, syncMeta);
+  sync.db.doc(sync.base + '/meta/state').set({
+    topics: plain(topics), topicsUpdated: syncMeta.topicsUpdated, deletedTopics: plain(syncMeta.delTopics),
+    daily: plain(daily), settings: { newPerDay: settings.newPerDay, maxReviews: settings.maxReviews, auto: !!settings.auto }, settingsUpdated: syncMeta.settingsUpdated
+  }, { merge: true }).then(() => { if (!sync.queue.size) setStatus('ok'); }).catch(e => { console.warn(e); setStatus('error', e && e.code); });
+}
+
+$('syncLogin').addEventListener('click', async () => {
+  if (!sync.auth) { toast('El servicio de sincronización no está disponible.'); return; }
+  try { await sync.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+  catch (e) {
+    const m = { 'auth/popup-blocked': 'El navegador bloqueó la ventana de Google. Permite ventanas emergentes para este sitio.', 'auth/popup-closed-by-user': 'Cerraste la ventana antes de terminar.', 'auth/unauthorized-domain': 'Este dominio no está autorizado en Firebase (Authentication → Settings → Authorized domains).', 'auth/operation-not-allowed': 'El inicio con Google no está activado en Firebase.' };
+    toast(m[e.code] || 'No se pudo iniciar sesión: ' + (e.code || e.message));
+  }
+});
+$('syncLogout').addEventListener('click', () => confirmModal('¿Cerrar sesión?', 'Dejarás de sincronizar. Tus tarjetas quedan guardadas en este dispositivo y siguen en la nube.', () => sync.auth.signOut()));
+$('syncHome').addEventListener('click', () => show('settings'));
+
 /* ═══════════ INICIO ═══════════ */
 (function init() {
   cards = lsGet(KEYS.cards, []);
@@ -663,8 +876,12 @@ document.addEventListener('keydown', e => {
   daily = lsGet(KEYS.daily, {});
   settings = { ...settings, ...lsGet(KEYS.settings, {}) };
   if (localStorage.getItem(KEYS.dark) === '1') { document.body.classList.add('dark'); $('darkBtn').textContent = '☀️'; }
+  syncMeta = { ...syncMeta, ...lsGet(KEYS.syncMeta, {}) }; syncMeta.delTopics = syncMeta.delTopics || {};
+  sync.pendingDel = lsGet(KEYS.pending, {});
   migrateCards();
+  syncBaseline();
   fillAllSelects();
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
   show('home');
+  initSync();
 })();

@@ -6,7 +6,7 @@
 <title>Flashcards de Coreano</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
 <header class="topbar">
@@ -54,6 +54,7 @@
         <button class="btn ghost" id="startPracticeHome">🎯 Practicar</button>
       </div>
       <div class="hint" id="homeHint"></div>
+      <div class="sync-line" id="syncHome" role="button" tabindex="0"></div>
     </div>
 
     <div class="grid-2">
@@ -226,6 +227,15 @@
 <!-- AJUSTES -->
 <section id="view-settings" class="view" style="display:none">
   <div class="panel">
+    <h3>Sincronización</h3>
+    <p class="muted">Inicia sesión con Google para tener las mismas tarjetas y el mismo avance en la PC y en el celular.</p>
+    <p class="muted" id="syncStatus"></p>
+    <div class="btn-row">
+      <button class="btn primary" id="syncLogin">Continuar con Google</button>
+      <button class="btn ghost" id="syncLogout" style="display:none">Cerrar sesión</button>
+    </div>
+  </div>
+  <div class="panel">
     <h3>Copia de seguridad</h3>
     <p class="muted">Tus tarjetas y tu progreso se guardan en este navegador. Exporta un archivo de vez en cuando por seguridad.</p>
     <div class="btn-row">
@@ -262,6 +272,9 @@
 <div class="modal" id="modal" style="display:none"><div class="modal-box" id="modalBox"></div></div>
 <div class="toast" id="toast"></div>
 
-<script src="script.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="script.js?v=3"></script>
 </body>
 </html>
